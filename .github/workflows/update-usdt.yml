@@ -1,12 +1,10 @@
 name: Update USDT Rates
 
 on:
-  schedule:
-    - cron: '0 14 * * *'
   workflow_dispatch:
 
 jobs:
-  update:
+  debug:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -15,85 +13,51 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         
-      - name: Fetch USDT from Binance P2P (DEBUG)
+      - name: Debug Binance API
         run: |
           #!/bin/bash
           
-          echo "🔄 Obteniendo tasas USDT de Binance P2P..."
+          echo "🔄 Probando conexión a Binance P2P..."
           echo ""
           
-          # Función para obtener precios P2P con depuración
-          fetch_prices() {
-            local TRADE_TYPE=$1
-            echo "📡 Consultando tradeType=$TRADE_TYPE..."
-            
-            RESPONSE=$(curl -s -X POST "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search" \
-              -H "Content-Type: application/json" \
-              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-              -d "{\"asset\":\"USDT\",\"fiat\":\"VES\",\"merchantCheck\":false,\"page\":1,\"payTypes\":[],\"publisherType\":null,\"rows\":50,\"tradeType\":\"$TRADE_TYPE\"}")
-            
-            echo "📋 Respuesta completa (primeros 500 caracteres):"
-            echo "$RESPONSE" | head -c 500
-            echo ""
-            echo ""
-            
-            # Verificar si la respuesta contiene "data"
-            HAS_DATA=$(echo "$RESPONSE" | jq 'has("data")')
-            echo "🔍 ¿Tiene campo 'data'?: $HAS_DATA"
-            
-            # Verificar si data es null
-            DATA_NULL=$(echo "$RESPONSE" | jq '.data == null')
-            echo "🔍 ¿'data' es null?: $DATA_NULL"
-            
-            # Verificar código de respuesta
-            CODE=$(echo "$RESPONSE" | jq -r '.code // "sin code"')
-            echo "🔍 Código de respuesta: $CODE"
-            
-            # Verificar mensaje
-            MESSAGE=$(echo "$RESPONSE" | jq -r '.message // "sin mensaje"')
-            echo "🔍 Mensaje: $MESSAGE"
-            
-            # Verificar si hay datos
-            DATA_COUNT=$(echo "$RESPONSE" | jq '.data | length')
-            echo "🔍 Cantidad de anuncios: $DATA_COUNT"
-            echo ""
-            
-            echo "$RESPONSE"
-          }
-          
-          # Obtener precios SELL
+          # Probar con curl mostrando headers
           echo "═══════════════════════════════════════════════════"
-          echo "📊 CONSULTANDO SELL (precios de COMPRA)"
+          echo "📡 Headers de respuesta:"
           echo "═══════════════════════════════════════════════════"
-          SELL_RESPONSE=$(fetch_prices "SELL")
-          
-          # Obtener precios BUY
-          echo "═══════════════════════════════════════════════════"
-          echo "📊 CONSULTANDO BUY (precios de VENTA)"
-          echo "═══════════════════════════════════════════════════"
-          BUY_RESPONSE=$(fetch_prices "BUY")
-          
-          # Verificar si hay datos suficientes
-          SELL_COUNT=$(echo "$SELL_RESPONSE" | jq '.data | length')
-          BUY_COUNT=$(echo "$BUY_RESPONSE" | jq '.data | length')
+          curl -s -i -X POST "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search" \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+            -d '{"asset":"USDT","fiat":"VES","merchantCheck":false,"page":1,"payTypes":[],"publisherType":null,"rows":50,"tradeType":"SELL"}' \
+            | head -30
           
           echo ""
           echo "═══════════════════════════════════════════════════"
-          echo "📊 RESUMEN FINAL"
+          echo "📡 Tipo de contenido recibido:"
           echo "═══════════════════════════════════════════════════"
-          echo "Anuncios SELL: $SELL_COUNT"
-          echo "Anuncios BUY: $BUY_COUNT"
-          
-          if [ "$SELL_COUNT" -eq 0 ] && [ "$BUY_COUNT" -eq 0 ]; then
-            echo ""
-            echo "❌ ERROR: No se encontraron anuncios en ninguna consulta"
-            echo ""
-            echo "Posibles causas:"
-            echo "1. Bloqueo geográfico (IP de GitHub Actions restringida)"
-            echo "2. Binance requiere headers adicionales"
-            echo "3. La API cambió"
-            exit 1
-          fi
+          curl -s -X POST "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search" \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+            -d '{"asset":"USDT","fiat":"VES","merchantCheck":false,"page":1,"payTypes":[],"publisherType":null,"rows":50,"tradeType":"SELL"}' \
+            | file -
           
           echo ""
-          echo "✅ Hay datos disponibles, continuando..."
+          echo "═══════════════════════════════════════════════════"
+          echo "📡 Guardando respuesta completa en archivo:"
+          echo "═══════════════════════════════════════════════════"
+          curl -s -X POST "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search" \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+            -d '{"asset":"USDT","fiat":"VES","merchantCheck":false,"page":1,"payTypes":[],"publisherType":null,"rows":50,"tradeType":"SELL"}' \
+            > response.txt
+          
+          echo "Primeros 1000 caracteres de la respuesta:"
+          head -c 1000 response.txt
+          echo ""
+          echo ""
+          
+          # Subir el archivo como artifact para inspeccionarlo
+      - name: Upload response for debugging
+        uses: actions/upload-artifact@v4
+        with:
+          name: binance-response
+          path: response.txt
