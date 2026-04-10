@@ -15,73 +15,85 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         
-      - name: Fetch USDT from Binance P2P
+      - name: Fetch USDT from Binance P2P (DEBUG)
         run: |
           #!/bin/bash
           
           echo "🔄 Obteniendo tasas USDT de Binance P2P..."
+          echo ""
           
+          # Función para obtener precios P2P con depuración
           fetch_prices() {
             local TRADE_TYPE=$1
-            curl -s -X POST "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search" \
+            echo "📡 Consultando tradeType=$TRADE_TYPE..."
+            
+            RESPONSE=$(curl -s -X POST "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search" \
               -H "Content-Type: application/json" \
               -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-              -d "{\"asset\":\"USDT\",\"fiat\":\"VES\",\"merchantCheck\":false,\"page\":1,\"payTypes\":[],\"publisherType\":null,\"rows\":50,\"tradeType\":\"$TRADE_TYPE\"}"
+              -d "{\"asset\":\"USDT\",\"fiat\":\"VES\",\"merchantCheck\":false,\"page\":1,\"payTypes\":[],\"publisherType\":null,\"rows\":50,\"tradeType\":\"$TRADE_TYPE\"}")
+            
+            echo "📋 Respuesta completa (primeros 500 caracteres):"
+            echo "$RESPONSE" | head -c 500
+            echo ""
+            echo ""
+            
+            # Verificar si la respuesta contiene "data"
+            HAS_DATA=$(echo "$RESPONSE" | jq 'has("data")')
+            echo "🔍 ¿Tiene campo 'data'?: $HAS_DATA"
+            
+            # Verificar si data es null
+            DATA_NULL=$(echo "$RESPONSE" | jq '.data == null')
+            echo "🔍 ¿'data' es null?: $DATA_NULL"
+            
+            # Verificar código de respuesta
+            CODE=$(echo "$RESPONSE" | jq -r '.code // "sin code"')
+            echo "🔍 Código de respuesta: $CODE"
+            
+            # Verificar mensaje
+            MESSAGE=$(echo "$RESPONSE" | jq -r '.message // "sin mensaje"')
+            echo "🔍 Mensaje: $MESSAGE"
+            
+            # Verificar si hay datos
+            DATA_COUNT=$(echo "$RESPONSE" | jq '.data | length')
+            echo "🔍 Cantidad de anuncios: $DATA_COUNT"
+            echo ""
+            
+            echo "$RESPONSE"
           }
           
-          echo "📊 Consultando precios de COMPRA (SELL)..."
+          # Obtener precios SELL
+          echo "═══════════════════════════════════════════════════"
+          echo "📊 CONSULTANDO SELL (precios de COMPRA)"
+          echo "═══════════════════════════════════════════════════"
           SELL_RESPONSE=$(fetch_prices "SELL")
-          BUY_COUNT=$(echo "$SELL_RESPONSE" | jq '.data | length')
-          echo "   Anuncios encontrados: $BUY_COUNT"
-          BUY_PRICES=$(echo "$SELL_RESPONSE" | jq '[.data[].adv.price | tonumber]')
-          AVG_COMPRA=$(echo "$BUY_PRICES" | jq 'if length > 0 then add / length else null end')
-          echo "   Promedio COMPRA: $AVG_COMPRA"
           
-          echo "📊 Consultando precios de VENTA (BUY)..."
+          # Obtener precios BUY
+          echo "═══════════════════════════════════════════════════"
+          echo "📊 CONSULTANDO BUY (precios de VENTA)"
+          echo "═══════════════════════════════════════════════════"
           BUY_RESPONSE=$(fetch_prices "BUY")
-          SELL_COUNT=$(echo "$BUY_RESPONSE" | jq '.data | length')
-          echo "   Anuncios encontrados: $SELL_COUNT"
-          SELL_PRICES=$(echo "$BUY_RESPONSE" | jq '[.data[].adv.price | tonumber]')
-          AVG_VENTA=$(echo "$SELL_PRICES" | jq 'if length > 0 then add / length else null end')
-          echo "   Promedio VENTA: $AVG_VENTA"
           
-          if [ "$AVG_COMPRA" != "null" ] && [ "$AVG_VENTA" != "null" ]; then
-            AVG_GENERAL=$(echo "scale=2; ($AVG_COMPRA + $AVG_VENTA) / 2" | bc -l)
-          elif [ "$AVG_COMPRA" != "null" ]; then
-            AVG_GENERAL=$AVG_COMPRA
-            echo "⚠️  Solo se encontraron precios de COMPRA"
-          elif [ "$AVG_VENTA" != "null" ]; then
-            AVG_GENERAL=$AVG_VENTA
-            echo "⚠️  Solo se encontraron precios de VENTA"
-          else
-            echo "❌ Error: No se pudieron obtener precios de Binance"
+          # Verificar si hay datos suficientes
+          SELL_COUNT=$(echo "$SELL_RESPONSE" | jq '.data | length')
+          BUY_COUNT=$(echo "$BUY_RESPONSE" | jq '.data | length')
+          
+          echo ""
+          echo "═══════════════════════════════════════════════════"
+          echo "📊 RESUMEN FINAL"
+          echo "═══════════════════════════════════════════════════"
+          echo "Anuncios SELL: $SELL_COUNT"
+          echo "Anuncios BUY: $BUY_COUNT"
+          
+          if [ "$SELL_COUNT" -eq 0 ] && [ "$BUY_COUNT" -eq 0 ]; then
+            echo ""
+            echo "❌ ERROR: No se encontraron anuncios en ninguna consulta"
+            echo ""
+            echo "Posibles causas:"
+            echo "1. Bloqueo geográfico (IP de GitHub Actions restringida)"
+            echo "2. Binance requiere headers adicionales"
+            echo "3. La API cambió"
             exit 1
           fi
           
-          echo "   Promedio GENERAL: $AVG_GENERAL"
-          
-          DATE_VE=$(TZ=America/Caracas date '+%Y-%m-%d %H:%M:%S')
-          DATE_ISO=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-          
-          cat > usdt_rates.json << JSON
-          {
-            "compra": $AVG_COMPRA,
-            "venta": $AVG_VENTA,
-            "promedio": $AVG_GENERAL,
-            "lastUpdated": "$DATE_ISO",
-            "lastUpdatedVE": "$DATE_VE",
-            "fuente": "Binance P2P (50 anuncios verificados)"
-          }
-          JSON
-          
           echo ""
-          echo "✅ Tasas actualizadas correctamente:"
-          cat usdt_rates.json
-          
-      - name: Commit and push changes
-        run: |
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add usdt_rates.json
-          git diff --quiet && git diff --staged --quiet || git commit -m "📊 Update USDT rates - $(TZ=America/Caracas date '+%Y-%m-%d')"
-          git push
+          echo "✅ Hay datos disponibles, continuando..."
