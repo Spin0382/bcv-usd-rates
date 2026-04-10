@@ -1,11 +1,26 @@
-      - name: Fetch USDT from Binance P2P
+name: Update USDT Rates
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Test Binance API parameters
         run: |
           #!/bin/bash
           
-          echo "🔄 Probando con parámetros mínimos..."
+          echo "🔄 Probando diferentes parámetros con Binance P2P..."
+          echo ""
           
           # Prueba 1: Solo asset, fiat, tradeType
-          echo ""
           echo "📡 Prueba 1: Solo asset, fiat, tradeType"
           curl -s -X POST "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search" \
             -H "Content-Type: application/json" \
@@ -22,7 +37,7 @@
           
           # Prueba 3: Con merchantCheck false
           echo ""
-          echo "📡 Prueba 3: asset, fiat, tradeType, page, rows, merchantCheck"
+          echo "📡 Prueba 3: con merchantCheck false"
           curl -s -X POST "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search" \
             -H "Content-Type: application/json" \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
