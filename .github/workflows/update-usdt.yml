@@ -27,16 +27,20 @@ jobs:
             curl -s -X POST "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search" \
               -H "Content-Type: application/json" \
               -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-              -d "{\"asset\":\"USDT\",\"fiat\":\"VES\",\"merchantCheck\":false,\"page\":1,\"payTypes\":[],\"publisherType\":\"\",\"rows\":20,\"tradeType\":\"$TRADE_TYPE\"}"
+              -d "{\"asset\":\"USDT\",\"fiat\":\"VES\",\"merchantCheck\":true,\"page\":1,\"payTypes\":[],\"publisherType\":\"\",\"rows\":20,\"tradeType\":\"$TRADE_TYPE\"}"
           }
           
           echo "📊 Consultando precios de COMPRA (SELL en Binance)..."
           SELL_RESPONSE=$(fetch_prices "SELL")
+          SELL_COUNT=$(echo "$SELL_RESPONSE" | jq '.data | length')
+          echo "   Anuncios encontrados: $SELL_COUNT"
           AVG_COMPRA=$(echo "$SELL_RESPONSE" | jq -r '[.data[].adv.price | tonumber] | add / length')
           echo "   Promedio COMPRA: $AVG_COMPRA"
           
           echo "📊 Consultando precios de VENTA (BUY en Binance)..."
           BUY_RESPONSE=$(fetch_prices "BUY")
+          BUY_COUNT=$(echo "$BUY_RESPONSE" | jq '.data | length')
+          echo "   Anuncios encontrados: $BUY_COUNT"
           AVG_VENTA=$(echo "$BUY_RESPONSE" | jq -r '[.data[].adv.price | tonumber] | add / length')
           echo "   Promedio VENTA: $AVG_VENTA"
           
@@ -62,7 +66,7 @@ jobs:
             "promedio": $PROMEDIO_FMT,
             "lastUpdated": "$DATE_ISO",
             "lastUpdatedVE": "$DATE_VE",
-            "fuente": "Binance P2P (promedio 20 anuncios)"
+            "fuente": "Binance P2P (promedio 20 anuncios verificados)"
           }
           JSON
           
