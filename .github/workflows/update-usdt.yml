@@ -32,13 +32,13 @@ jobs:
           
           echo "📊 Consultando precios de COMPRA (SELL en Binance)..."
           SELL_RESPONSE=$(fetch_prices "SELL")
-          AVG_COMPRA=$(echo "$SELL_RESPONSE" | jq -r '[.data[].adv.price | tonumber] | min')
-          echo "   Mejor precio COMPRA (mínimo): $AVG_COMPRA"
+          AVG_COMPRA=$(echo "$SELL_RESPONSE" | jq -r '[.data[].adv.price | tonumber] | add / length')
+          echo "   Promedio COMPRA: $AVG_COMPRA"
           
           echo "📊 Consultando precios de VENTA (BUY en Binance)..."
           BUY_RESPONSE=$(fetch_prices "BUY")
-          AVG_VENTA=$(echo "$BUY_RESPONSE" | jq -r '[.data[].adv.price | tonumber] | max')
-          echo "   Mejor precio VENTA (máximo): $AVG_VENTA"
+          AVG_VENTA=$(echo "$BUY_RESPONSE" | jq -r '[.data[].adv.price | tonumber] | add / length')
+          echo "   Promedio VENTA: $AVG_VENTA"
           
           if [ "$AVG_COMPRA" != "null" ] && [ "$AVG_VENTA" != "null" ]; then
             AVG_GENERAL=$(echo "scale=4; ($AVG_COMPRA + $AVG_VENTA) / 2" | bc -l)
@@ -62,7 +62,7 @@ jobs:
             "promedio": $PROMEDIO_FMT,
             "lastUpdated": "$DATE_ISO",
             "lastUpdatedVE": "$DATE_VE",
-            "fuente": "Binance P2P (mejores precios)"
+            "fuente": "Binance P2P (promedio 20 anuncios)"
           }
           JSON
           
