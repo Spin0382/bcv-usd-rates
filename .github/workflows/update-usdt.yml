@@ -26,7 +26,7 @@ jobs:
             curl -s -X POST "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search" \
               -H "Content-Type: application/json" \
               -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-              -d "{\"asset\":\"USDT\",\"fiat\":\"VES\",\"merchantCheck\":true,\"page\":1,\"payTypes\":[],\"publisherType\":null,\"rows\":50,\"tradeType\":\"$TRADE_TYPE\"}"
+              -d "{\"asset\":\"USDT\",\"fiat\":\"VES\",\"merchantCheck\":false,\"page\":1,\"payTypes\":[],\"publisherType\":null,\"rows\":50,\"tradeType\":\"$TRADE_TYPE\"}"
           }
           
           echo "📊 Consultando precios de COMPRA (SELL)..."
