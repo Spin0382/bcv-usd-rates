@@ -1,10 +1,12 @@
 name: Update USDT Rates
 
 on:
+  schedule:
+    - cron: '0 14 * * *'
   workflow_dispatch:
 
 jobs:
-  debug:
+  update:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -13,51 +15,71 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         
-      - name: Debug Binance API
+      - name: Fetch USDT from Binance P2P
         run: |
           #!/bin/bash
           
-          echo "🔄 Probando conexión a Binance P2P..."
-          echo ""
+          echo "🔄 Obteniendo tasas USDT de Binance P2P..."
           
-          # Probar con curl mostrando headers
-          echo "═══════════════════════════════════════════════════"
-          echo "📡 Headers de respuesta:"
-          echo "═══════════════════════════════════════════════════"
-          curl -s -i -X POST "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search" \
-            -H "Content-Type: application/json" \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-            -d '{"asset":"USDT","fiat":"VES","merchantCheck":false,"page":1,"payTypes":[],"publisherType":null,"rows":50,"tradeType":"SELL"}' \
-            | head -30
+          fetch_prices() {
+            local TRADE_TYPE=$1
+            curl -s -X POST "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search" \
+              -H "Content-Type: application/json" \
+              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+              -d "{\"asset\":\"USDT\",\"fiat\":\"VES\",\"merchantCheck\":false,\"page\":1,\"payTypes\":[],\"publisherType\":\"\",\"rows\":50,\"tradeType\":\"$TRADE_TYPE\"}"
+          }
+          
+          echo "📊 Consultando precios de COMPRA (SELL)..."
+          SELL_RESPONSE=$(fetch_prices "SELL")
+          SELL_COUNT=$(echo "$SELL_RESPONSE" | jq '.data | length')
+          echo "   Anuncios encontrados: $SELL_COUNT"
+          BUY_PRICES=$(echo "$SELL_RESPONSE" | jq '[.data[].adv.price | tonumber]')
+          AVG_COMPRA=$(echo "$BUY_PRICES" | jq 'if length > 0 then add / length else null end')
+          echo "   Promedio COMPRA: $AVG_COMPRA"
+          
+          echo "📊 Consultando precios de VENTA (BUY)..."
+          BUY_RESPONSE=$(fetch_prices "BUY")
+          BUY_COUNT=$(echo "$BUY_RESPONSE" | jq '.data | length')
+          echo "   Anuncios encontrados: $BUY_COUNT"
+          SELL_PRICES=$(echo "$BUY_RESPONSE" | jq '[.data[].adv.price | tonumber]')
+          AVG_VENTA=$(echo "$SELL_PRICES" | jq 'if length > 0 then add / length else null end')
+          echo "   Promedio VENTA: $AVG_VENTA"
+          
+          if [ "$AVG_COMPRA" != "null" ] && [ "$AVG_VENTA" != "null" ]; then
+            AVG_GENERAL=$(echo "scale=2; ($AVG_COMPRA + $AVG_VENTA) / 2" | bc -l)
+          elif [ "$AVG_COMPRA" != "null" ]; then
+            AVG_GENERAL=$AVG_COMPRA
+          elif [ "$AVG_VENTA" != "null" ]; then
+            AVG_GENERAL=$AVG_VENTA
+          else
+            echo "❌ Error: No se pudieron obtener precios"
+            exit 1
+          fi
+          
+          echo "   Promedio GENERAL: $AVG_GENERAL"
+          
+          DATE_VE=$(TZ=America/Caracas date '+%Y-%m-%d %H:%M:%S')
+          DATE_ISO=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          
+          cat > usdt_rates.json << JSON
+          {
+            "compra": $AVG_COMPRA,
+            "venta": $AVG_VENTA,
+            "promedio": $AVG_GENERAL,
+            "lastUpdated": "$DATE_ISO",
+            "lastUpdatedVE": "$DATE_VE",
+            "fuente": "Binance P2P (50 anuncios)"
+          }
+          JSON
           
           echo ""
-          echo "═══════════════════════════════════════════════════"
-          echo "📡 Tipo de contenido recibido:"
-          echo "═══════════════════════════════════════════════════"
-          curl -s -X POST "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search" \
-            -H "Content-Type: application/json" \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-            -d '{"asset":"USDT","fiat":"VES","merchantCheck":false,"page":1,"payTypes":[],"publisherType":null,"rows":50,"tradeType":"SELL"}' \
-            | file -
+          echo "✅ Tasas actualizadas:"
+          cat usdt_rates.json
           
-          echo ""
-          echo "═══════════════════════════════════════════════════"
-          echo "📡 Guardando respuesta completa en archivo:"
-          echo "═══════════════════════════════════════════════════"
-          curl -s -X POST "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search" \
-            -H "Content-Type: application/json" \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-            -d '{"asset":"USDT","fiat":"VES","merchantCheck":false,"page":1,"payTypes":[],"publisherType":null,"rows":50,"tradeType":"SELL"}' \
-            > response.txt
-          
-          echo "Primeros 1000 caracteres de la respuesta:"
-          head -c 1000 response.txt
-          echo ""
-          echo ""
-          
-          # Subir el archivo como artifact para inspeccionarlo
-      - name: Upload response for debugging
-        uses: actions/upload-artifact@v4
-        with:
-          name: binance-response
-          path: response.txt
+      - name: Commit and push changes
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add usdt_rates.json
+          git diff --quiet && git diff --staged --quiet || git commit -m "📊 Update USDT rates - $(TZ=America/Caracas date '+%Y-%m-%d')"
+          git push
