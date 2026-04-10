@@ -2,8 +2,8 @@ name: Update USDT Rates
 
 on:
   schedule:
-    - cron: '0 14 * * *'  # 10:00 AM Venezuela
-  workflow_dispatch:
+    - cron: '0 14 * * *'  # 14:00 UTC = 10:00 AM Venezuela
+  workflow_dispatch: # Permite ejecutarlo manualmente para hacer pruebas
 
 jobs:
   update:
@@ -26,54 +26,54 @@ jobs:
             curl -s -X POST "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search" \
               -H "Content-Type: application/json" \
               -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-              -d "{\"asset\":\"USDT\",\"fiat\":\"VES\",\"merchantCheck\":true,\"page\":1,\"payTypes\":[],\"publisherType\":\"\",\"rows\":20,\"tradeType\":\"$TRADE_TYPE\"}"
+              -d "{\"asset\":\"USDT\",\"fiat\":\"VES\",\"merchantCheck\":false,\"page\":1,\"payTypes\":[],\"publisherType\":\"\",\"rows\":20,\"tradeType\":\"$TRADE_TYPE\"}"
           }
           
-          echo "📊 Consultando precios de COMPRA (SELL)..."
+          echo "📊 Consultando precios de COMPRA (SELL en Binance)..."
           SELL_RESPONSE=$(fetch_prices "SELL")
-          SELL_COUNT=$(echo "$SELL_RESPONSE" | jq '.data | length')
-          echo "   Anuncios encontrados: $SELL_COUNT"
-          BUY_PRICES=$(echo "$SELL_RESPONSE" | jq '[.data[].adv.price | tonumber]')
-          AVG_COMPRA=$(echo "$BUY_PRICES" | jq 'if length > 0 then add / length else null end')
-          echo "   Promedio COMPRA: $AVG_COMPRA"
+          # Extraemos el valor mínimo absoluto de los 20 anuncios
+          AVG_COMPRA=$(echo "$SELL_RESPONSE" | jq -r '[.data[].adv.price | tonumber] | min')
+          echo "   Mejor precio COMPRA (mínimo): $AVG_COMPRA"
           
-          echo "📊 Consultando precios de VENTA (BUY)..."
+          echo "📊 Consultando precios de VENTA (BUY en Binance)..."
           BUY_RESPONSE=$(fetch_prices "BUY")
-          BUY_COUNT=$(echo "$BUY_RESPONSE" | jq '.data | length')
-          echo "   Anuncios encontrados: $BUY_COUNT"
-          SELL_PRICES=$(echo "$BUY_RESPONSE" | jq '[.data[].adv.price | tonumber]')
-          AVG_VENTA=$(echo "$SELL_PRICES" | jq 'if length > 0 then add / length else null end')
-          echo "   Promedio VENTA: $AVG_VENTA"
+          # Extraemos el valor máximo absoluto de los 20 anuncios
+          AVG_VENTA=$(echo "$BUY_RESPONSE" | jq -r '[.data[].adv.price | tonumber] | max')
+          echo "   Mejor precio VENTA (máximo): $AVG_VENTA"
           
           if [ "$AVG_COMPRA" != "null" ] && [ "$AVG_VENTA" != "null" ]; then
-            AVG_GENERAL=$(echo "scale=2; ($AVG_COMPRA + $AVG_VENTA) / 2" | bc -l)
-          elif [ "$AVG_COMPRA" != "null" ]; then
-            AVG_GENERAL=$AVG_COMPRA
-          elif [ "$AVG_VENTA" != "null" ]; then
-            AVG_GENERAL=$AVG_VENTA
+            # Calculamos el promedio general sumando ambos y dividiendo entre 2
+            AVG_GENERAL=$(echo "scale=4; ($AVG_COMPRA + $AVG_VENTA) / 2" | bc -l)
+            
+            # Formateamos los 3 valores a exactamente 2 decimales para un JSON limpio
+            COMPRA_FMT=$(printf "%.2f" $AVG_COMPRA)
+            VENTA_FMT=$(printf "%.2f" $AVG_VENTA)
+            PROMEDIO_FMT=$(printf "%.2f" $AVG_GENERAL)
           else
-            echo "❌ Error: No se pudieron obtener precios"
+            echo "❌ Error: No se pudieron obtener precios válidos."
             exit 1
           fi
           
-          echo "   Promedio GENERAL: $AVG_GENERAL"
+          echo "   Promedio GENERAL calculado: $PROMEDIO_FMT"
           
+          # Manejo de fechas
           DATE_VE=$(TZ=America/Caracas date '+%Y-%m-%d %H:%M:%S')
           DATE_ISO=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
           
+          # Generación del archivo JSON
           cat > usdt_rates.json << JSON
           {
-            "compra": $AVG_COMPRA,
-            "venta": $AVG_VENTA,
-            "promedio": $AVG_GENERAL,
+            "compra": $COMPRA_FMT,
+            "venta": $VENTA_FMT,
+            "promedio": $PROMEDIO_FMT,
             "lastUpdated": "$DATE_ISO",
             "lastUpdatedVE": "$DATE_VE",
-            "fuente": "Binance P2P (20 anuncios)"
+            "fuente": "Binance P2P (mejores precios)"
           }
           JSON
           
           echo ""
-          echo "✅ Tasas actualizadas:"
+          echo "✅ Tasas actualizadas correctamente:"
           cat usdt_rates.json
           
       - name: Commit and push changes
@@ -81,5 +81,6 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add usdt_rates.json
-          git diff --quiet && git diff --staged --quiet || git commit -m "📊 Update USDT rates - $(TZ=America/Caracas date '+%Y-%m-%d')"
+          # Solo hacemos commit si el archivo JSON realmente cambió
+          git diff --quiet && git diff --staged --quiet || git commit -m "📊 Update USDT rates - $(TZ=America/Caracas date '+%Y-%m-%d %H:%M')"
           git push
