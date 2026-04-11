@@ -16,44 +16,33 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         
-      - name: Fetch USDT from Binance P2P (50 anuncios)
+      - name: Fetch USDT from Binance P2P
         run: |
           #!/bin/bash
           
-          echo "🔄 Obteniendo tasas USDT de Binance P2P (50 anuncios)..."
+          echo "🔄 Obteniendo tasas USDT de Binance P2P..."
           
           fetch_prices() {
             local TRADE_TYPE=$1
-            local PAGE=$2
             curl -s -X POST "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search" \
               -H "Content-Type: application/json" \
               -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-              -d "{\"asset\":\"USDT\",\"fiat\":\"VES\",\"merchantCheck\":true,\"page\":$PAGE,\"payTypes\":[],\"publisherType\":\"\",\"rows\":20,\"tradeType\":\"$TRADE_TYPE\"}"
+              -d "{\"asset\":\"USDT\",\"fiat\":\"VES\",\"merchantCheck\":true,\"page\":1,\"payTypes\":[],\"publisherType\":\"\",\"rows\":20,\"tradeType\":\"$TRADE_TYPE\"}"
           }
           
-          echo "📊 Consultando precios de COMPRA (SELL) - 3 páginas..."
-          SELL_P1=$(fetch_prices "SELL" 1)
-          SELL_P2=$(fetch_prices "SELL" 2)
-          SELL_P3=$(fetch_prices "SELL" 3)
+          echo "📊 Consultando precios de COMPRA (SELL en Binance)..."
+          SELL_RESPONSE=$(fetch_prices "SELL")
+          SELL_COUNT=$(echo "$SELL_RESPONSE" | jq '.data | length')
+          echo "   Anuncios encontrados: $SELL_COUNT"
+          AVG_COMPRA=$(echo "$SELL_RESPONSE" | jq -r '[.data[].adv.price | tonumber] | add / length')
+          echo "   Promedio COMPRA: $AVG_COMPRA"
           
-          AVG_COMPRA=$(echo "[$SELL_P1, $SELL_P2, $SELL_P3]" | jq -r '
-            [.[].data[].adv.price | tonumber] | 
-            .[:50] | 
-            add / length
-          ')
-          echo "   Promedio COMPRA (50 anuncios): $AVG_COMPRA"
-          
-          echo "📊 Consultando precios de VENTA (BUY) - 3 páginas..."
-          BUY_P1=$(fetch_prices "BUY" 1)
-          BUY_P2=$(fetch_prices "BUY" 2)
-          BUY_P3=$(fetch_prices "BUY" 3)
-          
-          AVG_VENTA=$(echo "[$BUY_P1, $BUY_P2, $BUY_P3]" | jq -r '
-            [.[].data[].adv.price | tonumber] | 
-            .[:50] | 
-            add / length
-          ')
-          echo "   Promedio VENTA (50 anuncios): $AVG_VENTA"
+          echo "📊 Consultando precios de VENTA (BUY en Binance)..."
+          BUY_RESPONSE=$(fetch_prices "BUY")
+          BUY_COUNT=$(echo "$BUY_RESPONSE" | jq '.data | length')
+          echo "   Anuncios encontrados: $BUY_COUNT"
+          AVG_VENTA=$(echo "$BUY_RESPONSE" | jq -r '[.data[].adv.price | tonumber] | add / length')
+          echo "   Promedio VENTA: $AVG_VENTA"
           
           if [ "$AVG_COMPRA" != "null" ] && [ "$AVG_VENTA" != "null" ]; then
             AVG_GENERAL=$(echo "scale=4; ($AVG_COMPRA + $AVG_VENTA) / 2" | bc -l)
@@ -65,7 +54,7 @@ jobs:
             exit 1
           fi
           
-          echo "   Promedio GENERAL: $PROMEDIO_FMT"
+          echo "   Promedio GENERAL calculado: $PROMEDIO_FMT"
           
           DATE_VE=$(TZ=America/Caracas date '+%Y-%m-%d %H:%M:%S')
           DATE_ISO=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
@@ -77,7 +66,7 @@ jobs:
             "promedio": $PROMEDIO_FMT,
             "lastUpdated": "$DATE_ISO",
             "lastUpdatedVE": "$DATE_VE",
-            "fuente": "Binance P2P (promedio 50 anuncios verificados)"
+            "fuente": "Binance P2P (promedio 20 anuncios verificados)"
           }
           JSON
           
@@ -90,5 +79,5 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add usdt_rates.json
-          git diff --quiet && git diff --staged --quiet || git commit -m "📊 Update USDT rates (50 anuncios) - $(TZ=America/Caracas date '+%Y-%m-%d %H:%M')"
+          git diff --quiet && git diff --staged --quiet || git commit -m "📊 Update USDT rates - $(TZ=America/Caracas date '+%Y-%m-%d %H:%M')"
           git push
