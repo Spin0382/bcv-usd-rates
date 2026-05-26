@@ -1,8 +1,9 @@
 {
-  "compra": 734.79,
-  "venta": 737.61,
-  "promedio": 736.20,
-  "lastUpdated": "2026-05-26T13:05:37Z",
-  "lastUpdatedVE": "2026-05-26 09:05:37",
-  "fuente": "Binance P2P (promedio 50 anuncios verificados)"
+  "compra": 738.99,
+  "venta": 738.80,
+  "promedio": 738.89,
+  "tasa_principal": 738.80,
+  "lastUpdated": "2026-05-26T14:00:14Z",
+  "lastUpdatedVE": "2026-05-26 10:00:14",
+  "fuente": "Binance P2P (Ponderado 50 anuncios)"
 }
