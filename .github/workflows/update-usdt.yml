@@ -1,8 +1,8 @@
-name: Update USDT Rates (Analizador Avanzado)
+name: Update USDT Rates (Al Cambio Match)
 
 on:
   schedule:
-    - cron: '0 * * * *'  # Cada hora en punto (XX:00)
+    - cron: '0 * * * *'  # Ejecuta cada hora en punto (UTC). Venezuela es UTC-4.
   workflow_dispatch:
 
 jobs:
@@ -15,87 +15,86 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         
-      - name: Fetch and Calculate USDT Metrics
+      - name: Fetch & Calculate VWAP (Python)
         run: |
-          #!/bin/bash
-          echo "🔄 Obteniendo datos crudos de Binance P2P (3 páginas)..."
+          python3 << 'PYTHON_EOF'
+          import json, urllib.request, datetime, sys
+
+          def fetch_ads(trade_type):
+              """Obtiene anuncios de Binance P2P (3 páginas, 20 por página)"""
+              url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
+              headers = {
+                  "Content-Type": "application/json",
+                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+              }
+              ads = []
+              for page in range(1, 4):
+                  payload = {
+                      "asset": "USDT", "fiat": "VES", "merchantCheck": True,
+                      "page": page, "payTypes": [], "publisherType": "",
+                      "rows": 20, "tradeType": trade_type
+                  }
+                  req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers)
+                  try:
+                      with urllib.request.urlopen(req, timeout=15) as res:
+                          data = json.loads(res.read())
+                          for item in data.get("data", []):
+                              price = float(item["adv"]["price"])
+                              # Fallback seguro para cantidad disponible
+                              qty = float(item["adv"].get("tradableQuantity") or item["adv"].get("surplusAmount") or 1)
+                              ads.append({"price": price, "qty": qty})
+                  except Exception as e:
+                      print(f"⚠️ Error en página {page} ({trade_type}): {e}", file=sys.stderr)
+              return ads[:50]  # Al Cambio usa los primeros 50
+
+          def calculate_vwap(ads):
+              """Calcula el Precio Promedio Ponderado por Volumen (VWAP)"""
+              if not ads: return 0.0
+              total_value = sum(a["price"] * a["qty"] for a in ads)
+              total_qty = sum(a["qty"] for a in ads)
+              return round(total_value / total_qty, 2) if total_qty > 0 else 0.0
+
+          print("🔄 Consultando Binance P2P...")
+          # BUY en API = Comerciantes VENDIENDO = Tasa VENTA (Usuario compra)
+          # SELL en API = Comerciantes COMPRANDO = Tasa COMPRA (Usuario vende)
+          venta_ads = fetch_ads("BUY")
+          compra_ads = fetch_ads("SELL")
+
+          tasa_venta = calculate_vwap(venta_ads)
+          tasa_compra = calculate_vwap(compra_ads)
           
-          fetch_prices() {
-            local TRADE_TYPE=$1
-            local PAGE=$2
-            curl -s -X POST "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search" \
-              -H "Content-Type: application/json" \
-              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-              -d "{\"asset\":\"USDT\",\"fiat\":\"VES\",\"merchantCheck\":true,\"page\":$PAGE,\"payTypes\":[],\"publisherType\":\"\",\"rows\":20,\"tradeType\":\"$TRADE_TYPE\"}"
+          if tasa_venta == 0 or tasa_compra == 0:
+              print("❌ Error crítico: No se pudieron calcular tasas válidas. Abortando commit.")
+              sys.exit(1)
+
+          tasa_promedio = round((tasa_compra + tasa_venta) / 2, 2)
+
+          # Timestamps
+          now_ve = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-4)))
+          now_utc = datetime.datetime.now(datetime.timezone.utc)
+
+          output = {
+              "compra": tasa_compra,
+              "venta": tasa_venta,
+              "promedio": tasa_promedio,
+              "tasa_principal": tasa_venta,  # ✅ Coincide exactamente con Al Cambio
+              "lastUpdated": now_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "lastUpdatedVE": now_ve.strftime("%Y-%m-%d %H:%M:%S"),
+              "fuente": "Binance P2P (VWAP 50 anuncios verificados)"
           }
-          
-          # Obtener datos crudos
-          SELL_P1=$(fetch_prices "SELL" 1); SELL_P2=$(fetch_prices "SELL" 2); SELL_P3=$(fetch_prices "SELL" 3)
-          BUY_P1=$(fetch_prices "BUY" 1); BUY_P2=$(fetch_prices "BUY" 2); BUY_P3=$(fetch_prices "BUY" 3)
-          
-          # Función JQ Maestra: Calcula Simple, Ponderado y Recortado (Trimmed)
-          JQ_SCRIPT='
-            [.[].data[] | {
-              p: (.adv.price | tonumber), 
-              q: ((.adv.tradableQuantity // .adv.surplusAmount // "1") | tonumber)
-            }] | 
-            .[:50] |
-            {
-              simple: (map(.p) | add / length),
-              weighted: ((map(.p * .q) | add) / (map(.q) | add)),
-              trimmed: (map(.p) | sort | if length > 10 then .[5:-5] else . end | add / length)
-            } | "\(.simple) \(.weighted) \(.trimmed)"
-          '
-          
-          # SELL = Comerciantes comprando (Tasa de Compra de la App)
-          METRICS_COMPRA=$(echo "[$SELL_P1, $SELL_P2, $SELL_P3]" | jq -r "$JQ_SCRIPT")
-          # BUY = Comerciantes vendiendo (Tasa de Venta de la App)
-          METRICS_VENTA=$(echo "[$BUY_P1, $BUY_P2, $BUY_P3]" | jq -r "$JQ_SCRIPT")
-          
-          # Leer resultados en variables
-          read C_SIMPLE C_WEIGHTED C_TRIMMED <<< "$METRICS_COMPRA"
-          read V_SIMPLE V_WEIGHTED V_TRIMMED <<< "$METRICS_VENTA"
-          
-          echo "📊 COMPRA (Usuario vende USDT):"
-          echo "   Simple: $C_SIMPLE | Ponderado: $C_WEIGHTED | Recortado: $C_TRIMMED"
-          
-          echo "📊 VENTA (Usuario compra USDT):"
-          echo "   Simple: $V_SIMPLE | Ponderado: $V_WEIGHTED | Recortado: $V_TRIMMED"
-          
-          # Calcular Promedios Generales
-          G_SIMPLE=$(echo "scale=4; ($C_SIMPLE + $V_SIMPLE) / 2" | bc -l)
-          G_WEIGHTED=$(echo "scale=4; ($C_WEIGHTED + $V_WEIGHTED) / 2" | bc -l)
-          G_TRIMMED=$(echo "scale=4; ($C_TRIMMED + $V_TRIMMED) / 2" | bc -l)
-          
-          echo "📊 GENERAL:"
-          echo "   Simple: $G_SIMPLE | Ponderado: $G_WEIGHTED | Recortado: $G_TRIMMED"
-          
-          # --- AQUÍ DEBES ELEGIR LA GANADORA ---
-          # Por lo general, la "Tasa USDT" que muestra Al Cambio en grande es el VENTA PONDERADO o el GENERAL PONDERADO.
-          # Para este commit, usaremos el Ponderado de Venta como ejemplo, pero cámbialo según lo que veas en los logs.
-          FINAL_RATE=$(printf "%.2f" $V_WEIGHTED) 
-          
-          DATE_VE=$(TZ=America/Caracas date '+%Y-%m-%d %H:%M:%S')
-          DATE_ISO=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-          
-          cat > usdt_rates.json << JSON
-          {
-            "compra": $(printf "%.2f" $C_WEIGHTED),
-            "venta": $(printf "%.2f" $V_WEIGHTED),
-            "promedio": $(printf "%.2f" $G_WEIGHTED),
-            "tasa_principal": $FINAL_RATE,
-            "lastUpdated": "$DATE_ISO",
-            "lastUpdatedVE": "$DATE_VE",
-            "fuente": "Binance P2P (Ponderado 50 anuncios)"
-          }
-          JSON
-          
-          cat usdt_rates.json
-          
+
+          with open("usdt_rates.json", "w", encoding="utf-8") as f:
+              json.dump(output, f, indent=2)
+
+          print("✅ Tasas calculadas y guardadas:")
+          print(json.dumps(output, indent=2))
+          PYTHON_EOF
+
       - name: Commit and push changes
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add usdt_rates.json
-          git diff --quiet && git diff --staged --quiet || git commit -m "📊 Update USDT rates - $(TZ=America/Caracas date '+%H:%M')"
+          # Solo hace commit si hay cambios reales
+          git diff --staged --quiet || git commit -m "📊 Update USDT rate - $(date -u '+%H:%M UTC')"
           git push
