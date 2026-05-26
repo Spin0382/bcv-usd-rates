@@ -1,9 +1,8 @@
-name: Update USDT Rates (50 anuncios verificados)
+name: Update USDT Rates (Analizador Avanzado)
 
 on:
   schedule:
-    - cron: '0 13 * * *'  # 9:00 AM Venezuela (13:00 UTC)
-    - cron: '0 23 * * *'  # 7:00 PM Venezuela (23:00 UTC)
+    - cron: '0 * * * *'  # Cada hora en punto (XX:00)
   workflow_dispatch:
 
 jobs:
@@ -16,11 +15,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         
-      - name: Fetch USDT from Binance P2P (50 anuncios verificados)
+      - name: Fetch and Calculate USDT Metrics
         run: |
           #!/bin/bash
-          
-          echo "🔄 Obteniendo tasas USDT de Binance P2P (50 anuncios verificados)..."
+          echo "🔄 Obteniendo datos crudos de Binance P2P (3 páginas)..."
           
           fetch_prices() {
             local TRADE_TYPE=$1
@@ -31,58 +29,67 @@ jobs:
               -d "{\"asset\":\"USDT\",\"fiat\":\"VES\",\"merchantCheck\":true,\"page\":$PAGE,\"payTypes\":[],\"publisherType\":\"\",\"rows\":20,\"tradeType\":\"$TRADE_TYPE\"}"
           }
           
-          echo "📊 Consultando precios de COMPRA (SELL) - 3 páginas..."
-          SELL_P1=$(fetch_prices "SELL" 1)
-          SELL_P2=$(fetch_prices "SELL" 2)
-          SELL_P3=$(fetch_prices "SELL" 3)
+          # Obtener datos crudos
+          SELL_P1=$(fetch_prices "SELL" 1); SELL_P2=$(fetch_prices "SELL" 2); SELL_P3=$(fetch_prices "SELL" 3)
+          BUY_P1=$(fetch_prices "BUY" 1); BUY_P2=$(fetch_prices "BUY" 2); BUY_P3=$(fetch_prices "BUY" 3)
           
-          AVG_COMPRA=$(echo "[$SELL_P1, $SELL_P2, $SELL_P3]" | jq -r '
-            [.[].data[].adv.price | tonumber] | 
-            .[:50] | 
-            add / length
-          ')
-          echo "   Promedio COMPRA (50 anuncios): $AVG_COMPRA"
+          # Función JQ Maestra: Calcula Simple, Ponderado y Recortado (Trimmed)
+          JQ_SCRIPT='
+            [.[].data[] | {
+              p: (.adv.price | tonumber), 
+              q: ((.adv.tradableQuantity // .adv.surplusAmount // "1") | tonumber)
+            }] | 
+            .[:50] |
+            {
+              simple: (map(.p) | add / length),
+              weighted: ((map(.p * .q) | add) / (map(.q) | add)),
+              trimmed: (map(.p) | sort | if length > 10 then .[5:-5] else . end | add / length)
+            } | "\(.simple) \(.weighted) \(.trimmed)"
+          '
           
-          echo "📊 Consultando precios de VENTA (BUY) - 3 páginas..."
-          BUY_P1=$(fetch_prices "BUY" 1)
-          BUY_P2=$(fetch_prices "BUY" 2)
-          BUY_P3=$(fetch_prices "BUY" 3)
+          # SELL = Comerciantes comprando (Tasa de Compra de la App)
+          METRICS_COMPRA=$(echo "[$SELL_P1, $SELL_P2, $SELL_P3]" | jq -r "$JQ_SCRIPT")
+          # BUY = Comerciantes vendiendo (Tasa de Venta de la App)
+          METRICS_VENTA=$(echo "[$BUY_P1, $BUY_P2, $BUY_P3]" | jq -r "$JQ_SCRIPT")
           
-          AVG_VENTA=$(echo "[$BUY_P1, $BUY_P2, $BUY_P3]" | jq -r '
-            [.[].data[].adv.price | tonumber] | 
-            .[:50] | 
-            add / length
-          ')
-          echo "   Promedio VENTA (50 anuncios): $AVG_VENTA"
+          # Leer resultados en variables
+          read C_SIMPLE C_WEIGHTED C_TRIMMED <<< "$METRICS_COMPRA"
+          read V_SIMPLE V_WEIGHTED V_TRIMMED <<< "$METRICS_VENTA"
           
-          if [ "$AVG_COMPRA" != "null" ] && [ "$AVG_VENTA" != "null" ]; then
-            AVG_GENERAL=$(echo "scale=4; ($AVG_COMPRA + $AVG_VENTA) / 2" | bc -l)
-            COMPRA_FMT=$(printf "%.2f" $AVG_COMPRA)
-            VENTA_FMT=$(printf "%.2f" $AVG_VENTA)
-            PROMEDIO_FMT=$(printf "%.2f" $AVG_GENERAL)
-          else
-            echo "❌ Error: No se pudieron obtener precios válidos."
-            exit 1
-          fi
+          echo "📊 COMPRA (Usuario vende USDT):"
+          echo "   Simple: $C_SIMPLE | Ponderado: $C_WEIGHTED | Recortado: $C_TRIMMED"
           
-          echo "   Promedio GENERAL: $PROMEDIO_FMT"
+          echo "📊 VENTA (Usuario compra USDT):"
+          echo "   Simple: $V_SIMPLE | Ponderado: $V_WEIGHTED | Recortado: $V_TRIMMED"
+          
+          # Calcular Promedios Generales
+          G_SIMPLE=$(echo "scale=4; ($C_SIMPLE + $V_SIMPLE) / 2" | bc -l)
+          G_WEIGHTED=$(echo "scale=4; ($C_WEIGHTED + $V_WEIGHTED) / 2" | bc -l)
+          G_TRIMMED=$(echo "scale=4; ($C_TRIMMED + $V_TRIMMED) / 2" | bc -l)
+          
+          echo "📊 GENERAL:"
+          echo "   Simple: $G_SIMPLE | Ponderado: $G_WEIGHTED | Recortado: $G_TRIMMED"
+          
+          # --- AQUÍ DEBES ELEGIR LA GANADORA ---
+          # Por lo general, la "Tasa USDT" que muestra Al Cambio en grande es el VENTA PONDERADO o el GENERAL PONDERADO.
+          # Para este commit, usaremos el Ponderado de Venta como ejemplo, pero cámbialo según lo que veas en los logs.
+          FINAL_RATE=$(printf "%.2f" $V_WEIGHTED) 
           
           DATE_VE=$(TZ=America/Caracas date '+%Y-%m-%d %H:%M:%S')
           DATE_ISO=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
           
           cat > usdt_rates.json << JSON
           {
-            "compra": $COMPRA_FMT,
-            "venta": $VENTA_FMT,
-            "promedio": $PROMEDIO_FMT,
+            "compra": $(printf "%.2f" $C_WEIGHTED),
+            "venta": $(printf "%.2f" $V_WEIGHTED),
+            "promedio": $(printf "%.2f" $G_WEIGHTED),
+            "tasa_principal": $FINAL_RATE,
             "lastUpdated": "$DATE_ISO",
             "lastUpdatedVE": "$DATE_VE",
-            "fuente": "Binance P2P (promedio 50 anuncios verificados)"
+            "fuente": "Binance P2P (Ponderado 50 anuncios)"
           }
           JSON
           
-          echo ""
-          echo "✅ Tasas actualizadas correctamente:"
           cat usdt_rates.json
           
       - name: Commit and push changes
@@ -90,5 +97,5 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add usdt_rates.json
-          git diff --quiet && git diff --staged --quiet || git commit -m "📊 Update USDT rates (50 anuncios verificados) - $(TZ=America/Caracas date '+%Y-%m-%d %H:%M')"
+          git diff --quiet && git diff --staged --quiet || git commit -m "📊 Update USDT rates - $(TZ=America/Caracas date '+%H:%M')"
           git push
