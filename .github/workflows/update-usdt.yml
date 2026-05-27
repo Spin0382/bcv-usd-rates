@@ -1,8 +1,11 @@
-name: Update USDT Rates (Al Cambio Match)
+name: Update USDT Rates
 
 on:
-  schedule:
-    - cron: '0 * * * *'  # Ejecuta cada hora en punto (UTC). Venezuela es UTC-4.
+  # 🔔 Escucha las órdenes exactas de cron-job.org
+  repository_dispatch:
+    types: [actualizar_usdt]
+  
+  # 🧪 Permite ejecutar manualmente desde la pestaña Actions de GitHub
   workflow_dispatch:
 
 jobs:
@@ -14,6 +17,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        
+      - name: Log execution time
+        run: |
+          echo "⏰ Ejecución UTC: $(date -u '+%Y-%m-%d %H:%M:%S')"
+          echo "⏰ Ejecución VE: $(TZ=America/Caracas date '+%Y-%m-%d %H:%M:%S')"
+          echo "⏰ Trigger: ${{ github.event_name }}"
         
       - name: Fetch & Calculate VWAP (Python)
         run: |
@@ -40,12 +49,11 @@ jobs:
                           data = json.loads(res.read())
                           for item in data.get("data", []):
                               price = float(item["adv"]["price"])
-                              # Fallback seguro para cantidad disponible
                               qty = float(item["adv"].get("tradableQuantity") or item["adv"].get("surplusAmount") or 1)
                               ads.append({"price": price, "qty": qty})
                   except Exception as e:
                       print(f"⚠️ Error en página {page} ({trade_type}): {e}", file=sys.stderr)
-              return ads[:50]  # Al Cambio usa los primeros 50
+              return ads[:50]
 
           def calculate_vwap(ads):
               """Calcula el Precio Promedio Ponderado por Volumen (VWAP)"""
@@ -55,8 +63,6 @@ jobs:
               return round(total_value / total_qty, 2) if total_qty > 0 else 0.0
 
           print("🔄 Consultando Binance P2P...")
-          # BUY en API = Comerciantes VENDIENDO = Tasa VENTA (Usuario compra)
-          # SELL en API = Comerciantes COMPRANDO = Tasa COMPRA (Usuario vende)
           venta_ads = fetch_ads("BUY")
           compra_ads = fetch_ads("SELL")
 
@@ -69,7 +75,6 @@ jobs:
 
           tasa_promedio = round((tasa_compra + tasa_venta) / 2, 2)
 
-          # Timestamps
           now_ve = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-4)))
           now_utc = datetime.datetime.now(datetime.timezone.utc)
 
@@ -77,7 +82,7 @@ jobs:
               "compra": tasa_compra,
               "venta": tasa_venta,
               "promedio": tasa_promedio,
-              "tasa_principal": tasa_venta,  # ✅ Coincide exactamente con Al Cambio
+              "tasa_principal": tasa_venta,
               "lastUpdated": now_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
               "lastUpdatedVE": now_ve.strftime("%Y-%m-%d %H:%M:%S"),
               "fuente": "Binance P2P (VWAP 50 anuncios verificados)"
@@ -95,6 +100,5 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
           git add usdt_rates.json
-          # Solo hace commit si hay cambios reales
-          git diff --staged --quiet || git commit -m "📊 Update USDT rate - $(date -u '+%H:%M UTC')"
+          git diff --staged --quiet || git commit -m "📊 Update USDT rate - $(TZ=America/Caracas date '+%H:%M VE')"
           git push
