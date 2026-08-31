@@ -1,9 +1,9 @@
 {
-  "compra": 929.73,
-  "venta": 937.07,
-  "promedio": 933.4,
-  "tasa_principal": 937.07,
-  "lastUpdated": "2026-08-31T07:00:20Z",
-  "lastUpdatedVE": "2026-08-31 03:00:20",
+  "compra": 929.85,
+  "venta": 937.2,
+  "promedio": 933.53,
+  "tasa_principal": 937.2,
+  "lastUpdated": "2026-08-31T08:00:20Z",
+  "lastUpdatedVE": "2026-08-31 04:00:20",
   "fuente": "Binance P2P (VWAP 50 anuncios verificados)"
 }
